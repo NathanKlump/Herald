@@ -12,8 +12,8 @@ intents.messages = True
 client = commands.Bot(command_prefix='!', intents=intents)
 app = Flask(__name__)
 port = 3001
-token = "MTEyNzAxMzk2MDE0MzYwMTc5NA.GwzBU3.sOkGVe12AwPfHYqkEMZvALkl-uDeDXA3dHeJ6s"
-channel_id = "700096362506747935"
+token = ""
+channel_id = ""
 
 messages = {}  # Dictionary to store message IDs
 timers = {}    # Dictionary to store timers
