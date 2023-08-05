@@ -2,8 +2,6 @@ const { Client, Events, GatewayIntentBits } = require('discord.js');
 require('dotenv').config();
 const express = require('express');
 
-const { PersonalMessage } = require('./personalMessage');
-
 const app = express();
 const port = '3001';
 
@@ -22,9 +20,23 @@ const client = new Client({
     ], 
 });
 
-
 const messages = new Map(); // Map to store message IDs
 const timers = new Map(); // Map to store timers
+
+const PersonalMessage = (user, channel) => {
+    
+    if (user.includes('Jerkyturd')) {
+      return `${user} has joined ${channel} and is opening CSGO cases.`;
+    } else if (user.includes('icewallowpis')) {
+      return `${user} is in ${channel} being racist and homophobic.`;
+    } else if (user.includes('nathanielklump')) {
+      return `${user} has joined ${channel} and will probably be leaving in 30 min.`;
+    } else if (user.includes('acidpuddle')) {
+        return `${user} has joined ${channel} and will be lowering everyone's mental.`;
+    } else {
+      return `${user} joined voice channel ${channel}`;
+    }
+  };
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
     const channelId = process.env.DISCORD_CHANNEL_ID;
