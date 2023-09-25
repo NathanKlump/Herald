@@ -33,6 +33,8 @@ const PersonalMessage = (user, channel) => {
       return `${user} has joined ${channel} and will probably be leaving in 30 min.`;
     } else if (user.includes('acidpuddle')) {
         return `${user} has joined ${channel} and will be lowering everyone's mental.`;
+    } else if (user.includes('adamj3961')) {
+        return `${user} has joined ${channel}, this is a rare occurance.`;
     } else {
       return `${user} joined voice channel ${channel}`;
     }
