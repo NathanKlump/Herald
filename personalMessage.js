@@ -5,7 +5,7 @@ const PersonalMessage = (user, channel) => {
     } else if (user.includes('icewallowpis')) {
       return `${user} is in ${channel} being racist and homophobic.`;
     } else if (user.includes('nathanielklump')) {
-      return `${user} has joined ${channel} and will probably be leaving in 30 min.`;
+      return `${user}. gay. ${channel}.`;
     } else if (user.includes('acidpuddle')) {
         return `${user} has joined ${channel} and will be lowering everyone's mental.`;
     } else {

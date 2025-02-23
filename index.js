@@ -9,7 +9,6 @@ app.get('/status', (req, res) => {
     res.send('Herald of the Obese is running!');
 });
 
-
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds,
@@ -28,20 +27,22 @@ const PersonalMessage = (user, channel) => {
     if (user.includes('Jerkyturd')) {
       return `${user} has joined ${channel} and is opening CSGO cases.`;
     } else if (user.includes('icewallowpis')) {
-      return `${user} is in ${channel} being a great guy!`;
+      return `${user} is being racist and homophobic. ${channel}!`;
     } else if (user.includes('nathanielklump')) {
-      return `${user} has joined ${channel} and will probably be leaving in 30 min.`;
+      return `${user}. gay. ${channel}.`;
     } else if (user.includes('acidpuddle')) {
-        return `${user} has joined ${channel} and will be lowering everyone's mental.`;
+        return `${user} touched down in ${channel} and will be lowering everyone's mental.`;
     } else if (user.includes('adamj3961')) {
-        return `${user} has joined ${channel}, this is a rare occurance.`;
+        return `${user}. gay. ${channel}.`;
+    } else if (user.includes('dillon')) {
+        return `${user}. gay. ${channel}.`;
     } else {
       return `${user} joined voice channel ${channel}`;
     }
   };
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    const channelId = process.env.DISCORD_CHANNEL_ID;
+    const channelId = "nuh";
 
     // user join message
     if (newState.channelId && newState.member.user.id !== client.user.id) {
@@ -87,12 +88,11 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
 });
 
-
 client.once(Events.ClientReady, c => {
 	console.log(`Ready! Logged in as ${c.user.tag}`);
 });
 
-client.login(process.env.DISCORD_BOT_TOKEN);
+client.login("nuh");
 
 
 app.listen(port, () => {console.log(`Server is running on port: ${port}`);});
