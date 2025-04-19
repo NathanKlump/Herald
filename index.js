@@ -63,7 +63,7 @@ async function deleteAllBotMessages() {
         while (Date.now() - startTime < timeLimit) {
             // Check if we've exceeded the time limit
             if (Date.now() - startTime >= timeLimit) {
-                console.log(`Time limit of 30 seconds reached. Stopping deletion process.`);
+                console.log(`Time limit of ${timeLimit/1000} seconds reached. Stopping deletion process.`);
                 break;
             }
             
@@ -89,7 +89,7 @@ async function deleteAllBotMessages() {
             for (const [id, message] of botMessages) {
                 // Check time limit before each deletion
                 if (Date.now() - startTime >= timeLimit) {
-                    console.log(`Time limit of 30 seconds reached during deletion. Stopping.`);
+                    console.log(`Time limit of ${timeLimit/1000} seconds reached during deletion. Stopping.`);
                     break;
                 }
                 
@@ -115,7 +115,7 @@ async function deleteAllBotMessages() {
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
     // user join message
-    if (newState.channel_Id && newState.member.user.id !== client.user.id) {
+    if (newState.channelId && newState.member.user.id !== client.user.id) {
         console.log(`${newState.member.user.tag} joined voice channel ${newState.channel.name}`);
         // Start a 2-second timer for this user to send the join message
         timers.set(newState.member.user.id, setTimeout(async () => {
@@ -129,7 +129,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         }, 2000));
     }
     // user leave action
-    if (oldState.channel_Id && oldState.member.user.id !== client.user.id) {
+    if (oldState.channelId && oldState.member.user.id !== client.user.id) {
         console.log(`${oldState.member.user.tag} left voice channel ${oldState.channel.name}`);
         // If the user leaves within 2 seconds, clear the join message timer
         const timer = timers.get(oldState.member.user.id);
