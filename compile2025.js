@@ -1,11 +1,10 @@
-require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
-const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
-const { pipeline } = require('stream/promises');
+require("dotenv").config();
+const { Client, GatewayIntentBits } = require("discord.js");
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+const fs = require("fs");
+const path = require("path");
+const https = require("https");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -13,364 +12,393 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 const CLIP_CHANNEL_1 = process.env.CLIP_CHANNEL_1;
 const CLIP_CHANNEL_2 = process.env.CLIP_CHANNEL_2;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
-const OUTPUT_DIR = path.join(__dirname, 'compilations');
+
+const DOWNLOAD_DIR = path.join(__dirname, "downloads");
+const OUTPUT_DIR = path.join(__dirname, "compilations");
+const ASSETS_DIR = path.join(__dirname, "assets");
+const TRANSITION_PATH = path.join(ASSETS_DIR, "transition.mp4");
 
 // Video file extensions to look for
-const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.flv', '.wmv'];
+const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm", ".avi", ".mkv", ".flv", ".wmv"];
+
+// Normalization target (safe defaults)
+const TARGET_W = 1280;
+const TARGET_H = 720;
+const TARGET_FPS = 24;
+const AUDIO_RATE = 48000;
 
 // Initialize Discord client
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 /**
  * Fetch all messages from a channel during 2025
  */
 async function fetchMessagesFrom2025(channelId) {
-    console.log(`Fetching messages from channel ${channelId}...`);
-    const channel = await client.channels.fetch(channelId);
-    const allMessages = [];
-    let lastMessageId = null;
+  console.log(`Fetching messages from channel ${channelId}...`);
+  const channel = await client.channels.fetch(channelId);
+  const allMessages = [];
+  let lastMessageId = null;
 
-    // 2025 date range
-    const startOf2025 = new Date('2025-01-01T00:00:00Z');
-    const endOf2025 = new Date('2025-12-31T23:59:59Z');
+  const startOf2025 = new Date("2025-01-01T00:00:00Z");
+  const endOf2025 = new Date("2025-12-31T23:59:59Z");
 
-    while (true) {
-        const options = { limit: 100 };
-        if (lastMessageId) {
-            options.before = lastMessageId;
-        }
+  while (true) {
+    const options = { limit: 100 };
+    if (lastMessageId) options.before = lastMessageId;
 
-        const messages = await channel.messages.fetch(options);
+    const messages = await channel.messages.fetch(options);
+    if (messages.size === 0) break;
 
-        if (messages.size === 0) break;
+    for (const message of messages.values()) {
+      const messageDate = message.createdAt;
 
-        for (const message of messages.values()) {
-            const messageDate = message.createdAt;
-
-            // Stop if we've gone past 2025
-            if (messageDate < startOf2025) {
-                return allMessages;
-            }
-
-            // Only include messages from 2025
-            if (messageDate >= startOf2025 && messageDate <= endOf2025) {
-                allMessages.push(message);
-            }
-        }
-
-        lastMessageId = messages.last().id;
-
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (messageDate < startOf2025) return allMessages; // we paged past 2025
+      if (messageDate >= startOf2025 && messageDate <= endOf2025) allMessages.push(message);
     }
 
-    return allMessages;
+    lastMessageId = messages.last().id;
+    await new Promise((resolve) => setTimeout(resolve, 1000)); // avoid rate limiting
+  }
+
+  return allMessages;
 }
 
 /**
  * Filter messages that have video attachments
  */
 function filterVideoMessages(messages) {
-    const videoMessages = [];
+  const videoMessages = [];
 
-    for (const message of messages) {
-        if (message.attachments.size > 0) {
-            for (const attachment of message.attachments.values()) {
-                const ext = path.extname(attachment.name).toLowerCase();
-                if (VIDEO_EXTENSIONS.includes(ext)) {
-                    videoMessages.push({
-                        timestamp: message.createdAt,
-                        author: message.author.tag,
-                        url: attachment.url,
-                        filename: attachment.name,
-                        messageId: message.id
-                    });
-                }
-            }
-        }
+  for (const message of messages) {
+    if (!message.attachments?.size) continue;
+
+    for (const attachment of message.attachments.values()) {
+      const ext = path.extname(attachment.name || "").toLowerCase();
+      if (!VIDEO_EXTENSIONS.includes(ext)) continue;
+
+      videoMessages.push({
+        timestamp: message.createdAt,
+        author: message.author?.tag ?? "unknown",
+        url: attachment.url,
+        filename: attachment.name ?? `clip${ext}`,
+        messageId: message.id,
+      });
     }
+  }
 
-    // Sort by timestamp (chronological order)
-    videoMessages.sort((a, b) => a.timestamp - b.timestamp);
-
-    return videoMessages;
+  videoMessages.sort((a, b) => a.timestamp - b.timestamp);
+  return videoMessages;
 }
 
 /**
  * Download a video from a URL
  */
 async function downloadVideo(url, outputPath) {
-    return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(outputPath);
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(outputPath);
 
-        https.get(url, (response) => {
-            if (response.statusCode !== 200) {
-                reject(new Error(`Failed to download: ${response.statusCode}`));
-                return;
-            }
+    https
+      .get(url, (response) => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to download: ${response.statusCode}`));
+          return;
+        }
 
-            response.pipe(file);
+        response.pipe(file);
 
-            file.on('finish', () => {
-                file.close();
-                resolve();
-            });
-        }).on('error', (err) => {
-            fs.unlink(outputPath, () => {});
-            reject(err);
+        file.on("finish", () => {
+          file.close();
+          resolve();
         });
+      })
+      .on("error", (err) => {
+        fs.unlink(outputPath, () => {});
+        reject(err);
+      });
 
-        file.on('error', (err) => {
-            fs.unlink(outputPath, () => {});
-            reject(err);
-        });
+    file.on("error", (err) => {
+      fs.unlink(outputPath, () => {});
+      reject(err);
     });
+  });
+}
+
+/**
+ * Ensure directory exists
+ */
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 }
 
 /**
  * Download all videos
  */
 async function downloadAllVideos(videoMessages, channelName) {
-    console.log(`\nDownloading ${videoMessages.length} videos for ${channelName}...`);
+  console.log(`\nDownloading ${videoMessages.length} videos for ${channelName}...`);
 
-    const channelDir = path.join(DOWNLOAD_DIR, channelName);
-    if (!fs.existsSync(channelDir)) {
-        fs.mkdirSync(channelDir, { recursive: true });
+  const channelDir = path.join(DOWNLOAD_DIR, channelName);
+  const rawDir = path.join(channelDir, "raw");
+  const normDir = path.join(channelDir, "norm");
+
+  ensureDir(rawDir);
+  ensureDir(normDir);
+
+  const downloadedVideos = [];
+
+  for (let i = 0; i < videoMessages.length; i++) {
+    const video = videoMessages[i];
+    const ext = path.extname(video.filename) || ".mp4";
+    const rawPath = path.join(rawDir, `raw_${i.toString().padStart(5, "0")}${ext}`);
+
+    try {
+      console.log(`  [${i + 1}/${videoMessages.length}] Downloading: ${video.filename}`);
+      await downloadVideo(video.url, rawPath);
+      downloadedVideos.push({
+        rawPath,
+        ...video,
+      });
+    } catch (error) {
+      console.error(`  Failed to download ${video.filename}: ${error.message}`);
     }
 
-    const downloadedVideos = [];
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 
-    for (let i = 0; i < videoMessages.length; i++) {
-        const video = videoMessages[i];
-        const ext = path.extname(video.filename);
-        const outputPath = path.join(channelDir, `video_${i.toString().padStart(4, '0')}${ext}`);
-
-        try {
-            console.log(`  [${i + 1}/${videoMessages.length}] Downloading: ${video.filename}`);
-            await downloadVideo(video.url, outputPath);
-            downloadedVideos.push({
-                path: outputPath,
-                ...video
-            });
-        } catch (error) {
-            console.error(`  Failed to download ${video.filename}: ${error.message}`);
-        }
-
-        // Small delay between downloads
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    return downloadedVideos;
+  return { downloadedVideos, normDir, channelDir };
 }
 
 /**
- * Concatenate videos using FFmpeg
+ * Normalize a single clip to a consistent format so concat won't break.
  */
-async function concatenateVideos(videos, outputPath, channelName) {
-    return new Promise((resolve, reject) => {
-        if (videos.length === 0) {
-            reject(new Error('No videos to concatenate'));
-            return;
-        }
+async function normalizeClip(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    // Make everything same resolution + CFR + audio rate/layout
+    const vf = [
+      `scale=${TARGET_W}:${TARGET_H}:force_original_aspect_ratio=decrease`,
+      `pad=${TARGET_W}:${TARGET_H}:(ow-iw)/2:(oh-ih)/2`,
+      `fps=${TARGET_FPS}`,
+    ].join(",");
 
-        console.log(`\nCreating compilation for ${channelName}...`);
-        console.log(`Output: ${outputPath}`);
+    ffmpeg()
+      .input(inputPath)
+      .inputOptions([
+        "-fflags", "+genpts",
+        "-err_detect", "ignore_err",
+      ])
+      .videoFilters(vf)
+      .outputOptions([
+        // video
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-preset", "veryfast",
+        "-crf", "20",
+        // audio
+        "-c:a", "aac",
+        "-ar", String(AUDIO_RATE),
+        "-ac", "2",
+        "-b:a", "192k",
+        // container flags
+        "-movflags", "+faststart",
+      ])
+      .output(outputPath)
+      .on("end", resolve)
+      .on("error", (err) => reject(err))
+      .run();
+  });
+}
 
-        // Create a file list for FFmpeg concat
-        const listFilePath = path.join(path.dirname(videos[0].path), 'filelist.txt');
-        const fileListContent = videos.map(v => `file '${path.basename(v.path)}'`).join('\n');
-        fs.writeFileSync(listFilePath, fileListContent);
+/**
+ * Normalize all downloaded videos (and optional transition) to a uniform format.
+ */
+async function normalizeAll(downloadedVideos, normDir) {
+  console.log(`\nNormalizing ${downloadedVideos.length} clips...`);
+  const normalized = [];
 
-        ffmpeg()
-            .input(listFilePath)
-            .inputOptions(['-f', 'concat', '-safe', '0'])
-            .outputOptions(['-c', 'copy'])
-            .output(outputPath)
-            .on('start', (commandLine) => {
-                console.log('FFmpeg command:', commandLine);
-            })
-            .on('progress', (progress) => {
-                if (progress.percent) {
-                    console.log(`Progress: ${progress.percent.toFixed(2)}%`);
-                }
-            })
-            .on('end', () => {
-                console.log(`Compilation complete: ${outputPath}`);
-                fs.unlinkSync(listFilePath);
-                resolve();
-            })
-            .on('error', (err) => {
-                console.error('FFmpeg error:', err.message);
-                if (fs.existsSync(listFilePath)) {
-                    fs.unlinkSync(listFilePath);
-                }
-                reject(err);
-            })
-            .run();
-    });
+  for (let i = 0; i < downloadedVideos.length; i++) {
+    const src = downloadedVideos[i].rawPath;
+    const out = path.join(normDir, `clip_${i.toString().padStart(5, "0")}.mp4`);
+
+    try {
+      console.log(`  [${i + 1}/${downloadedVideos.length}] Normalizing ${path.basename(src)}`);
+      await normalizeClip(src, out);
+      normalized.push({ path: out, ...downloadedVideos[i] });
+    } catch (e) {
+      console.error(`  Failed to normalize ${path.basename(src)}: ${e.message}`);
+    }
+  }
+
+  return normalized;
+}
+
+/**
+ * Normalize transition to match the same target format (if it exists).
+ */
+async function normalizeTransition(normDir) {
+  if (!fs.existsSync(TRANSITION_PATH)) return null;
+
+  const out = path.join(normDir, "__transition__.mp4");
+  try {
+    console.log(`\nNormalizing transition: ${TRANSITION_PATH}`);
+    await normalizeClip(TRANSITION_PATH, out);
+    return out;
+  } catch (e) {
+    console.warn(`Transition exists but failed to normalize, skipping transitions: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Create concat list file with absolute paths.
+ */
+function writeConcatListFile(items, listFilePath) {
+  // concat demuxer requires: file '/abs/path'
+  const lines = items.map((p) => `file '${p.replace(/'/g, "'\\''")}'`);
+  fs.writeFileSync(listFilePath, lines.join("\n"));
+}
+
+/**
+ * Concatenate videos safely (everything already normalized).
+ */
+async function concatenateNormalizedVideos(normalizedVideos, outputPath, channelName, transitionNormPath) {
+  return new Promise((resolve, reject) => {
+    if (normalizedVideos.length === 0) {
+      reject(new Error("No normalized videos to concatenate"));
+      return;
+    }
+
+    console.log(`\nCreating compilation for ${channelName}...`);
+    console.log(`Output: ${outputPath}`);
+
+    const listFilePath = path.join(path.dirname(normalizedVideos[0].path), "concat_filelist.txt");
+    const files = [];
+
+    for (let i = 0; i < normalizedVideos.length; i++) {
+      files.push(normalizedVideos[i].path);
+      if (transitionNormPath && i < normalizedVideos.length - 1) {
+        files.push(transitionNormPath);
+      }
+    }
+
+    writeConcatListFile(files, listFilePath);
+
+    ffmpeg()
+      .input(listFilePath)
+      .inputOptions(["-f", "concat", "-safe", "0"])
+      // Now -c copy is safe because everything matches
+      .outputOptions(["-c", "copy", "-movflags", "+faststart"])
+      .output(outputPath)
+      .on("start", (cmd) => console.log("FFmpeg command:", cmd))
+      .on("end", () => {
+        console.log(`Compilation complete: ${outputPath}`);
+        try { fs.unlinkSync(listFilePath); } catch {}
+        resolve();
+      })
+      .on("error", (err) => {
+        console.error("FFmpeg error:", err.message);
+        try { fs.unlinkSync(listFilePath); } catch {}
+        reject(err);
+      })
+      .run();
+  });
 }
 
 /**
  * Clean up downloaded videos
  */
 function cleanupDownloads(channelName) {
-    const channelDir = path.join(DOWNLOAD_DIR, channelName);
-
-    if (fs.existsSync(channelDir)) {
-        console.log(`\nCleaning up downloads for ${channelName}...`);
-        fs.rmSync(channelDir, { recursive: true, force: true });
-        console.log('Cleanup complete.');
-    }
+  const channelDir = path.join(DOWNLOAD_DIR, channelName);
+  if (fs.existsSync(channelDir)) {
+    console.log(`\nCleaning up downloads for ${channelName}...`);
+    fs.rmSync(channelDir, { recursive: true, force: true });
+    console.log("Cleanup complete.");
+  }
 }
 
 /**
- * Process a single channel
+ * Process and compile combined channels
  */
-async function processChannel(channelId, channelName) {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`Processing Channel: ${channelName}`);
-    console.log('='.repeat(60));
+async function processCombinedChannels() {
+  console.log("Fetching clips from both channels...");
 
-    try {
-        // Fetch messages
-        const messages = await fetchMessagesFrom2025(channelId);
-        console.log(`Found ${messages.length} total messages from 2025`);
+  const messages1 = await fetchMessagesFrom2025(CLIP_CHANNEL_1);
+  console.log(`Channel 1: Found ${messages1.length} total messages from 2025`);
 
-        // Filter video messages
-        const videoMessages = filterVideoMessages(messages);
-        console.log(`Found ${videoMessages.length} video clips`);
+  const messages2 = await fetchMessagesFrom2025(CLIP_CHANNEL_2);
+  console.log(`Channel 2: Found ${messages2.length} total messages from 2025`);
 
-        if (videoMessages.length === 0) {
-            console.log('No videos to compile for this channel.');
-            return;
-        }
+  const videoMessages1 = filterVideoMessages(messages1);
+  const videoMessages2 = filterVideoMessages(messages2);
 
-        // Download videos
-        const downloadedVideos = await downloadAllVideos(videoMessages, channelName);
+  console.log(`Channel 1: Found ${videoMessages1.length} video clips`);
+  console.log(`Channel 2: Found ${videoMessages2.length} video clips`);
 
-        if (downloadedVideos.length === 0) {
-            console.log('No videos were successfully downloaded.');
-            return;
-        }
+  const allVideos = [...videoMessages1, ...videoMessages2].sort((a, b) => a.timestamp - b.timestamp);
+  console.log(`\nTotal videos to compile: ${allVideos.length}`);
 
-        // Create output directory
-        if (!fs.existsSync(OUTPUT_DIR)) {
-            fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-        }
+  if (allVideos.length === 0) {
+    console.log("No videos found to compile.");
+    return;
+  }
 
-        // Concatenate videos
-        const outputPath = path.join(OUTPUT_DIR, `${channelName}_2025_compilation.mp4`);
-        await concatenateVideos(downloadedVideos, outputPath, channelName);
+  const { downloadedVideos, normDir } = await downloadAllVideos(allVideos, "combined");
 
-        // Cleanup
-        cleanupDownloads(channelName);
+  if (downloadedVideos.length === 0) {
+    console.log("No videos were successfully downloaded.");
+    return;
+  }
 
-        console.log(`\n✓ ${channelName} compilation completed successfully!`);
+  // Normalize clips
+  const normalizedVideos = await normalizeAll(downloadedVideos, normDir);
 
-    } catch (error) {
-        console.error(`Error processing ${channelName}:`, error);
-        // Still cleanup even if there was an error
-        cleanupDownloads(channelName);
-    }
+  if (normalizedVideos.length === 0) {
+    console.log("No videos were successfully normalized.");
+    return;
+  }
+
+  // Normalize transition (optional)
+  const transitionNormPath = await normalizeTransition(normDir);
+  if (transitionNormPath) console.log("✓ Transitions enabled (normalized).");
+  else console.log("⚠ Transitions disabled.");
+
+  ensureDir(OUTPUT_DIR);
+  const outputPath = path.join(OUTPUT_DIR, "2025_compilation.mp4");
+
+  await concatenateNormalizedVideos(normalizedVideos, outputPath, "Combined", transitionNormPath);
+
+  // Cleanup raw/norm downloads
+  cleanupDownloads("combined");
+
+  console.log("\nCompilation complete!");
+  console.log(`Output: ${outputPath}`);
 }
 
 /**
  * Main function
  */
 async function main() {
-    try {
-        console.log('Herald Video Compilation Script - 2025 Year End');
-        console.log('================================================\n');
+  try {
+    console.log("Herald Video Compilation Script - 2025 Year End");
+    console.log("================================================\n");
 
-        // Validate environment variables
-        if (!CLIP_CHANNEL_1 || !CLIP_CHANNEL_2) {
-            throw new Error('Please set CLIP_CHANNEL_1 and CLIP_CHANNEL_2 in your .env file');
-        }
+    if (!CLIP_CHANNEL_1 || !CLIP_CHANNEL_2) throw new Error("Please set CLIP_CHANNEL_1 and CLIP_CHANNEL_2 in your .env file");
+    if (!DISCORD_BOT_TOKEN) throw new Error("Please set DISCORD_BOT_TOKEN in your .env file");
 
-        if (!DISCORD_BOT_TOKEN) {
-            throw new Error('Please set DISCORD_BOT_TOKEN in your .env file');
-        }
+    console.log("Logging in to Discord...");
+    await client.login(DISCORD_BOT_TOKEN);
+    console.log("Logged in successfully!\n");
 
-        console.log('Logging in to Discord...');
-        await client.login(DISCORD_BOT_TOKEN);
-        console.log('Logged in successfully!\n');
+    await processCombinedChannels();
 
-        // Fetch messages from both channels
-        console.log('='.repeat(60));
-        console.log('Fetching clips from both channels...');
-        console.log('='.repeat(60));
-
-        const messages1 = await fetchMessagesFrom2025(CLIP_CHANNEL_1);
-        console.log(`Channel 1: Found ${messages1.length} total messages from 2025`);
-
-        const messages2 = await fetchMessagesFrom2025(CLIP_CHANNEL_2);
-        console.log(`Channel 2: Found ${messages2.length} total messages from 2025`);
-
-        // Filter video messages from both channels
-        const videoMessages1 = filterVideoMessages(messages1);
-        const videoMessages2 = filterVideoMessages(messages2);
-        console.log(`Channel 1: Found ${videoMessages1.length} video clips`);
-        console.log(`Channel 2: Found ${videoMessages2.length} video clips`);
-
-        // Combine and sort all videos by timestamp
-        const allVideos = [...videoMessages1, ...videoMessages2];
-        allVideos.sort((a, b) => a.timestamp - b.timestamp);
-        console.log(`\nTotal videos to compile: ${allVideos.length}`);
-
-        if (allVideos.length === 0) {
-            console.log('No videos found to compile.');
-            await client.destroy();
-            process.exit(0);
-        }
-
-        // Download all videos
-        const downloadedVideos = await downloadAllVideos(allVideos, 'combined');
-
-        if (downloadedVideos.length === 0) {
-            console.log('No videos were successfully downloaded.');
-            await client.destroy();
-            process.exit(1);
-        }
-
-        // Create output directory
-        if (!fs.existsSync(OUTPUT_DIR)) {
-            fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-        }
-
-        // Concatenate all videos into one compilation
-        const outputPath = path.join(OUTPUT_DIR, '2025_compilation.mp4');
-        await concatenateVideos(downloadedVideos, outputPath, 'Combined');
-
-        // Cleanup
-        cleanupDownloads('combined');
-
-        console.log('\n' + '='.repeat(60));
-        console.log('Compilation complete!');
-        console.log(`Output: ${outputPath}`);
-        console.log('='.repeat(60));
-
-        // Logout and exit
-        await client.destroy();
-        process.exit(0);
-
-    } catch (error) {
-        console.error('Fatal error:', error);
-        await client.destroy();
-        process.exit(1);
-    }
+    await client.destroy();
+    process.exit(0);
+  } catch (error) {
+    console.error("Fatal error:", error);
+    try { await client.destroy(); } catch {}
+    process.exit(1);
+  }
 }
 
-// Handle client ready event
-client.once('ready', () => {
-    console.log('Bot is ready!');
-});
-
-// Start the script
+client.once("ready", () => console.log("Bot is ready!"));
 main();
