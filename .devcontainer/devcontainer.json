@@ -1,0 +1,16 @@
+{
+  "name": "Herald",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "node",
+  "postCreateCommand": "npm ci",
+  "forwardPorts": [3001],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
